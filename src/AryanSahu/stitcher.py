@@ -8,7 +8,7 @@ class PanaromaStitcher():
     def __init__(self):
         pass
 
-    def make_panaroma_for_images_in(self,path):
+    def make_panaroma_for_images_in(self,path, focal_length = 1000):
         imf = path
         all_images = sorted(glob.glob(imf+os.sep+'*'))
         print('Found {} Images for stitching'.format(len(all_images)))
@@ -16,11 +16,14 @@ class PanaromaStitcher():
         ####  Your Implementation here
         # Read images
         images = [cv2.imread(im) for im in all_images]
-        images = [cv2.resize(im, (800,400)) for im in images]
+
+        ratio = images[0].shape[0]/images[0].shape[1]
+        new_size = (800, int(800*ratio))
+        images = [cv2.resize(im, new_size) for im in images]
         if len(images) < 2:
             print("Need at least 2 images to stitch a panorama.")
             return None, []
-
+        images = [self.cylindrical_projection(im, focal_length) for im in images]
         # Homography matrices will be stored here
         homography_matrix_list = []
         # middle_index = len(images) // 2
@@ -213,3 +216,32 @@ class PanaromaStitcher():
         cv2.imwrite("./results/I4/aryansahu.png", output_img)
         result_img = output_img
         return result_img
+        
+    def cylindrical_projection(self, image, f):
+        """Apply cylindrical projection to an image with a given focal length `f`."""
+        h, w = image.shape[:2]
+        cyl_image = np.zeros_like(image)
+
+        # Calculate center of the image
+        cx, cy = w // 2, h // 2
+
+        # Perform cylindrical transformation
+        for y in range(h):
+            for x in range(w):
+                theta = (x - cx) / f  # Angle theta
+                h_ = (y - cy) / f     # Height offset
+
+                # Compute cylindrical coordinates
+                X = np.sin(theta)
+                Y = h_
+                Z = np.cos(theta)
+
+                # Map back to image coordinates
+                x_cyl = int(f * X / Z + cx)
+                y_cyl = int(f * Y / Z + cy)
+
+                # Assign pixel if it's within bounds
+                if 0 <= x_cyl < w and 0 <= y_cyl < h:
+                    cyl_image[y, x] = image[y_cyl, x_cyl]
+
+        return cyl_image
