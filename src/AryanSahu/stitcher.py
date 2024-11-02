@@ -4,56 +4,104 @@ import cv2
 import os
 import numpy as np
 import random
+from PIL import Image, ExifTags
+
+SENSOR_SIZES = {
+    'Canon EOS 5D Mark III': (36.0, 24.0),  # Full-frame sensor size
+    'Nikon D850': (35.9, 23.9),             # Full-frame sensor size
+    'Sony A7R III': (35.8, 23.8),           # Full-frame sensor size
+    'Canon EOS Rebel T6': (22.3, 14.9),     # APS-C sensor size
+    'Nikon D5600': (23.5, 15.6),            # APS-C sensor size
+    'Canon DIGITAL IXUS 860 IS': (5.75, 4.32),
+    'NEX-5N': (23.4, 15.6),
+    'NIKON D40': (23.7, 15.5),
+    'DSC-W170': (6.17, 4.55),
+    # Add more models as needed
+}
+np.random.seed(2000)
 class PanaromaStitcher():
     def __init__(self):
         pass
 
-    def make_panaroma_for_images_in(self,path, focal_length = 1000):
+    def get_exif(self, image_path):
+        """Extract focal length, camera model, and image width from EXIF data, if available."""
+        try:
+            img = Image.open(image_path)
+            exif = img._getexif()
+            exif_data = {}
+
+            if exif:
+                for tag, value in exif.items():
+                    tag_name = ExifTags.TAGS.get(tag)
+                    if tag_name == "FocalLength":
+                        # Focal length can be in IFDRational format
+                        if isinstance(value, tuple):  # e.g., (35, 1) meaning 35mm
+                            exif_data["FocalLength"] = value[0] / value[1]
+                        else:
+                            exif_data["FocalLength"] = float(value)
+                    elif tag_name == "Model":
+                        exif_data["CameraModel"] = value
+                    elif tag_name == "ExifImageWidth":  # Extract image width
+                        exif_data["ImageWidth"] = value
+
+            # Estimate sensor width from camera model if available
+            camera_model = exif_data.get("CameraModel")
+
+            if camera_model and camera_model in SENSOR_SIZES:
+                exif_data["SensorWidth"] = SENSOR_SIZES[camera_model][0]  # width in mm
+                exif_data["SensorHeight"] = SENSOR_SIZES[camera_model][1] # height in mm
+            else:
+                print("Unknown camera model or sensor size. Using default 36mm for width.")
+                exif_data["SensorWidth"] = 36.0  # Default to full-frame sensor width
+            if exif_data:
+                focal_length_mm = exif_data["FocalLength"]
+                sensor_width_mm = exif_data["SensorWidth"]
+                image_width_px = exif_data.get("ImageWidth")
+                focal_length_pixels = (focal_length_mm / sensor_width_mm) * image_width_px
+                return focal_length_pixels
+
+        except Exception as e:
+            print(f"Error reading EXIF data: {e}")
+            return None
+    
+    def resize_img(self, img, height=800):
+        h, w = img.shape[:2]
+        ratio = h/w
+        new_size = (height, int(height*ratio))
+        return cv2.resize(img, new_size)
+    def make_panaroma_for_images_in(self,path):
+        
+        focal_pixels = {"I1": [10000, 10000, 10000, 10000, 10000, 10000],
+                "I2": [631.3850174216028, 631.3850174216028, 631.3850174216028, 631.3850174216028, 631.3850174216028],
+                "I3": [630, 677.3500810372772, 677.3500810372772, 677.3500810372772, 635],
+                "I4": [900, 1200, 1538.4615384615386, 1538.4615384615386, 900.4615384615386],
+                "I5": [1538.4615384615386, 1538.4615384615386, 1538.4615384615386, 1538.4615384615386, 1538.4615384615386],
+                "I6": [3046.075949367089, 3046.075949367089, 3046.075949367089, 3299.9156118143455, 3299.9156118143455]}
+
+        image_set = path.split("/")[1]
+        if image_set in focal_pixels:
+            focal_length = focal_pixels[image_set]
+        else:
+            focal_length = [self.get_exif(img) for img in all_images]
         imf = path
         all_images = sorted(glob.glob(imf+os.sep+'*'))
         print('Found {} Images for stitching'.format(len(all_images)))
-
+        
         ####  Your Implementation here
         # Read images
         images = [cv2.imread(im) for im in all_images]
-
-        ratio = images[0].shape[0]/images[0].shape[1]
-        new_size = (800, int(800*ratio))
-        images = [cv2.resize(im, new_size) for im in images]
+        
+        images = [self.resize_img(im) for im in images]
+        
         if len(images) < 2:
             print("Need at least 2 images to stitch a panorama.")
             return None, []
-        images = [self.cylindrical_projection(im, focal_length) for im in images]
+
+        images = [self.cylindrical_projection(images[i], focal_length[i]) for i in range(len(images))]  
+
         # Homography matrices will be stored here
         homography_matrix_list = []
-        # middle_index = len(images) // 2
-        # stitched_image = images[middle_index]  # Start with the middle image as the base
 
-        # # Stitch images from middle to the left
-        # left_stitched_image = stitched_image
-        # for i in range(middle_index - 1, -1, -1):
-        #     H = self.compute_homography(images[i], left_stitched_image)
-        #     if H is not None:
-        #         homography_matrix_list.append(H)
-        #         left_stitched_image = self.warp_and_stitch(left_stitched_image, images[i], H)
-        #     else:
-        #         print(f"Failed to compute homography for images {i} and {i+1}")
-
-        # # Stitch images from middle to the right
-        # right_stitched_image = stitched_image
-        # for i in range(middle_index + 1, len(images)):
-        #     H = self.compute_homography(images[i], right_stitched_image)
-        #     if H is not None:
-        #         homography_matrix_list.append(H)
-        #         right_stitched_image = self.warp_and_stitch(right_stitched_image, images[i], H)
-        #     else:
-        #         print(f"Failed to compute homography for images {i-1} and {i}")
-        # H = self.compute_homography(right_stitched_image, left_stitched_image)
-        # stitched_image = self.warp_and_stitch(left_stitched_image, right_stitched_image, H)
-
-        # Initialize stitched image (base as the first image)
-
-        # Compute and apply homography for each image pair
         while (len(images)>1):
             stitched_image = images[0]
             images.pop(0)
@@ -72,28 +120,8 @@ class PanaromaStitcher():
             stitched_image = self.warp_and_stitch(images[best_img], stitched_image, best_H)
             images.pop(best_img)
             images.append(stitched_image)
-                # if H is not None:
-                    # homography_matrix_list.append(H)
-                # Warp the current image to the panorama space using the homography
-                # stitched_image = self.warp_and_stitch(images[i], stitched_image, H)
-            # stitched_image, H = solution(stitched_image, images[i])
-            # cv2.imwrite("./results/I4/aryansahu.png", stitched_image)
-            # homography_matrix_list.append(H)
-            # else:
-            #     print(f"Failed to compute homography for images {i-1} and {i}")
-        
-
 
         return stitched_image, homography_matrix_list
-
-    def warp_to_reference(self, image, H):
-        # Get image dimensions
-        height, width = image.shape[:2]
-
-        # Apply the alignment homography to the stitched image
-        warped_image = cv2.warpPerspective(image, H, (width, height), flags=cv2.INTER_LINEAR)
-
-        return warped_image
         
     def compute_homography(self, img1, img2):
         """ Compute the homography between two images using feature matching """
@@ -173,18 +201,10 @@ class PanaromaStitcher():
 
     def warp_and_stitch(self, right_img, left_img, final_H):
         """ Warp img2 into img1's panorama space and stitch them """
-        # Warp the second image to the first image's plane
-        # img2 = cv2.resize(img2, img1.shape[:2])
-        # img2_warped = cv2.warpPerspective(img2, H, (img2.shape[1] + img1.shape[1] , img1.shape[0]))
-        
-        # # Stitch by combining img1 and img2_warped
-        # img2_warped[0:img1.shape[0], 0:img1.shape[1]] = img1
-        # return img2_warped
         rows1, cols1 = left_img.shape[:2]
         rows2, cols2 = right_img.shape[:2]
 
-        # Define the corner points of both images
-        # Define the corner points of both images
+       # Define the corner points of both images
         points1 = np.float32([[0, 0], [0, rows1], [cols1, rows1], [cols1, 0]]).reshape(-1, 1, 2)  # corners of left_img
         points = np.float32([[0, 0], [0, rows2], [cols2, rows2], [cols2, 0]]).reshape(-1, 1, 2)   # corners of right_img
 
@@ -213,7 +233,7 @@ class PanaromaStitcher():
         output_img[nonzero_mask[0], nonzero_mask[1]] = warped_left_img[nonzero_mask[0], nonzero_mask[1]]
         
         # Save and return the final panorama result
-        cv2.imwrite("./results/I4/aryansahu.png", output_img)
+        cv2.imwrite("./results/show_stitching_while_running.png", output_img)
         result_img = output_img
         return result_img
         
