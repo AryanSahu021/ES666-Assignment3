@@ -18,7 +18,6 @@ SENSOR_SIZES = {
     'DSC-W170': (6.17, 4.55),
     # Add more models as needed
 }
-np.random.seed(2000)
 class PanaromaStitcher():
     def __init__(self):
         pass
